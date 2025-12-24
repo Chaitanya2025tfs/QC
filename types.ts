@@ -32,17 +32,10 @@ export interface SubSampleRecord {
   score: number;
 }
 
-export type EvaluationSlot = '12 PM' | '4 PM' | '6 PM';
-
 export interface QCRecord {
   id: string;
   date: string;
-  time: {
-    hr: string;
-    min: string;
-    period: 'AM' | 'PM';
-  };
-  evaluationSlot: EvaluationSlot; // New field for daily tracking
+  timeSlot: string; // "12 PM" | "4 PM" | "6 PM"
   tlName: string;
   agentName: string;
   managerName: string;

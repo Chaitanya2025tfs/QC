@@ -1,7 +1,8 @@
+
 import React, { useMemo, useState } from 'react';
 import { getRecords, getUsers } from '../store';
-import { User, UserRole, QCRecord, EvaluationSlot } from '../types';
-import { PROJECTS, EVALUATION_SLOTS } from '../constants.tsx';
+import { User, UserRole, QCRecord } from '../types';
+import { PROJECTS, TIME_SLOTS } from '../constants.tsx';
 import { 
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
   PieChart, Pie
@@ -31,6 +32,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const [selectedProject, setSelectedProject] = useState<string>('All');
   const [isAgentFilterOpen, setIsAgentFilterOpen] = useState(false);
 
+  const SLOT_COLORS: Record<string, string> = {
+    '12 PM': '#6366f1',   // Indigo
+    '4 PM': '#f59e0b',    // Amber
+    '6 PM': '#334155'     // Slate-700
+  };
+
   const filteredRecords = useMemo(() => {
     return records.filter(r => {
       if (user.role === UserRole.AGENT && r.agentName !== user.name) return false;
@@ -51,35 +58,25 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     return { mainAvg, reworkAvg, activeProjectsCount, activeAgentsCount };
   }, [filteredRecords]);
 
-  // For Trend Lines
+  // Aggregate scores by Date and Time Slot
+  // Logic: Shows AVERAGE score for the slot if multiple tasks exist
   const trendLineData = useMemo(() => {
     const dates = Array.from(new Set(filteredRecords.map(r => r.date))).sort();
-    const activeAgents = Array.from(new Set(filteredRecords.map(r => r.agentName)));
     
-    const agentSlots: string[] = [];
-    activeAgents.forEach(agent => {
-      EVALUATION_SLOTS.forEach(slot => {
-        agentSlots.push(`${agent} (${slot})`);
-      });
-    });
-
     const processRecords = (type: 'regular' | 'rework') => {
       return dates.map(d => {
         const data: any = { date: d };
-        activeAgents.forEach(agent => {
-          EVALUATION_SLOTS.forEach(slot => {
-            const match = filteredRecords.find(r => 
-              r.date === d && 
-              r.agentName === agent && 
-              r.evaluationSlot === slot && 
-              !r.noWork &&
-              (type === 'rework' ? r.reworkStatus : true)
-            );
-            if (match) {
-              const score = type === 'rework' ? match.avgScore : (match.originalScore ?? match.avgScore);
-              data[`${agent} (${slot})`] = score;
-            }
-          });
+        TIME_SLOTS.forEach(slot => {
+          const slotMatches = filteredRecords.filter(r => 
+            r.date === d && 
+            r.timeSlot === slot &&
+            !r.noWork &&
+            (type === 'rework' ? r.reworkStatus : true)
+          );
+          if (slotMatches.length > 0) {
+            const sum = slotMatches.reduce((acc, r) => acc + (type === 'rework' ? r.avgScore : (r.originalScore ?? r.avgScore)), 0);
+            data[slot] = parseFloat((sum / slotMatches.length).toFixed(1));
+          }
         });
         return data;
       });
@@ -87,28 +84,28 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
 
     return { 
       regular: processRecords('regular'), 
-      rework: processRecords('rework'), 
-      agentSlots 
+      rework: processRecords('rework') 
     };
   }, [filteredRecords]);
 
-  // For Project Wise Scores (Horizontal Bar Charts)
+  // Aggregate scores by Project and Time Slot
   const horizontalProjectData = useMemo(() => {
-    const activeAgents = Array.from(new Set(filteredRecords.map(r => r.agentName)));
-    
     const processHorizontal = (type: 'regular' | 'rework') => {
-      return PROJECTS.map(proj => {
+      // If a specific project is selected, we only process that one
+      const targetProjects = selectedProject === 'All' ? PROJECTS : [selectedProject];
+      
+      return targetProjects.map(proj => {
         const data: any = { projectName: proj };
-        activeAgents.forEach(agent => {
+        TIME_SLOTS.forEach(slot => {
           const matches = filteredRecords.filter(r => 
             r.projectName === proj && 
-            r.agentName === agent && 
+            r.timeSlot === slot &&
             !r.noWork &&
             (type === 'rework' ? r.reworkStatus : true)
           );
           if (matches.length > 0) {
             const sum = matches.reduce((acc, r) => acc + (type === 'rework' ? r.avgScore : (r.originalScore ?? r.avgScore)), 0);
-            data[agent] = parseFloat((sum / matches.length).toFixed(1));
+            data[slot] = parseFloat((sum / matches.length).toFixed(1));
           }
         });
         return data;
@@ -117,12 +114,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
 
     return { 
       regular: processHorizontal('regular'), 
-      rework: processHorizontal('rework'), 
-      agents: activeAgents 
+      rework: processHorizontal('rework')
     };
-  }, [filteredRecords]);
+  }, [filteredRecords, selectedProject]);
 
-  // Unique Active Agents Details per Project
   const agentsDetailByProject = useMemo(() => {
     return PROJECTS.map(proj => {
       const uniqueAgents = Array.from(new Set(
@@ -138,14 +133,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     }).filter(p => p.agentCount > 0);
   }, [filteredRecords]);
 
-  const colors = ['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#475569', '#9333ea'];
+  const genericColors = ['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#475569', '#9333ea'];
 
   return (
     <div className="space-y-6 flex flex-col h-full bg-slate-50">
       <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-wrap items-center justify-between gap-6 shrink-0">
         <div className="flex flex-col">
           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">
-            {user.role === UserRole.AGENT ? "My Personal Slicer" : "Single Agent Slicer"}
+            {user.role === UserRole.AGENT ? "My Performance Analysis" : "QC Performance Slicer"}
           </span>
           <div className="flex flex-wrap items-center gap-3">
             {user.role !== UserRole.AGENT ? (
@@ -219,16 +214,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
           <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center"><i className="bi bi-stack text-2xl text-rose-600"></i></div>
         </div>
         <div className="bg-white p-6 rounded-[2rem] shadow-sm border-l-[8px] border-amber-500 flex items-center justify-between">
-          <div><p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">{user.role === UserRole.AGENT ? "Daily Records" : "Active Selection"}</p><h3 className="text-4xl font-black">{user.role === UserRole.AGENT ? filteredRecords.length : (selectedAgent === 'All' ? kpis.activeAgentsCount : 1)}</h3></div>
+          <div><p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">{user.role === UserRole.AGENT ? "Total Audits" : "Active Selection"}</p><h3 className="text-4xl font-black">{user.role === UserRole.AGENT ? filteredRecords.length : (selectedAgent === 'All' ? kpis.activeAgentsCount : 1)}</h3></div>
           <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center"><i className="bi bi-person-check text-2xl text-amber-600"></i></div>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar pr-3 pb-12 space-y-10">
-        {/* Trend Lines Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
-            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6"><i className="bi bi-graph-up-arrow text-indigo-600 mr-2"></i> Quality Trend (Regular)</h4>
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
+              <i className="bi bi-graph-up-arrow text-indigo-600"></i> Time Slot Trends (Regular)
+            </h4>
             <div className="flex-1 min-h-0">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trendLineData.regular}>
@@ -237,15 +233,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   <YAxis domain={[0, 100]} tick={{fontSize: 10, fontWeight: 700}} axisLine={false} />
                   <Tooltip contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}} />
                   <Legend iconType="circle" />
-                  {trendLineData.agentSlots.map((slotKey, i) => (
-                    <Line key={slotKey} type="monotone" dataKey={slotKey} stroke={colors[i % colors.length]} strokeWidth={3} dot={{r: 4}} connectNulls />
+                  {TIME_SLOTS.map((slot) => (
+                    <Line key={slot} type="monotone" dataKey={slot} stroke={SLOT_COLORS[slot]} strokeWidth={3} dot={{r: 4}} connectNulls />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
             </div>
           </div>
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
-            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6"><i className="bi bi-arrow-repeat text-emerald-600 mr-2"></i> Quality Trend (Rework)</h4>
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
+              <i className="bi bi-arrow-repeat text-emerald-600"></i> Time Slot Trends (Rework)
+            </h4>
             <div className="flex-1 min-h-0">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trendLineData.rework}>
@@ -254,8 +252,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   <YAxis domain={[0, 100]} tick={{fontSize: 10, fontWeight: 700}} axisLine={false} />
                   <Tooltip contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}} />
                   <Legend iconType="circle" />
-                  {trendLineData.agentSlots.map((slotKey, i) => (
-                    <Line key={slotKey} type="monotone" dataKey={slotKey} stroke={colors[i % colors.length]} strokeWidth={3} dot={{r: 4}} connectNulls />
+                  {TIME_SLOTS.map((slot) => (
+                    <Line key={slot} type="monotone" dataKey={slot} stroke={SLOT_COLORS[slot]} strokeWidth={3} dot={{r: 4}} connectNulls />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
@@ -263,10 +261,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
           </div>
         </div>
 
-        {/* Project Wise QC Score Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
-            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6"><i className="bi bi-bar-chart-steps text-indigo-600 mr-2"></i> Project QC Score (Regular)</h4>
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
+              <i className="bi bi-bar-chart-steps text-indigo-600"></i> {selectedProject === 'All' ? 'Project QC Avg per Slot' : `Task Performance in Slots (${selectedProject})`}
+            </h4>
             <div className="flex-1 min-h-0">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={horizontalProjectData.regular} layout="vertical" margin={{ left: 40, right: 30 }}>
@@ -275,8 +274,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   <YAxis dataKey="projectName" type="category" tick={{fontSize: 10, fontWeight: 700}} axisLine={false} width={80} />
                   <Tooltip contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}} />
                   <Legend iconType="circle" />
-                  {horizontalProjectData.agents.map((agent, i) => (
-                    <Bar key={agent} dataKey={agent} fill={colors[i % colors.length]} radius={[0, 5, 5, 0]} />
+                  {TIME_SLOTS.map((slot) => (
+                    <Bar key={slot} dataKey={slot} fill={SLOT_COLORS[slot]} radius={[0, 5, 5, 0]} />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
@@ -284,7 +283,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
           </div>
 
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
-            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6"><i className="bi bi-bar-chart-steps text-emerald-600 mr-2"></i> Project QC Score (Rework)</h4>
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
+              <i className="bi bi-bar-chart-steps text-emerald-600"></i> Rework Performance per Slot
+            </h4>
             <div className="flex-1 min-h-0">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={horizontalProjectData.rework} layout="vertical" margin={{ left: 40, right: 30 }}>
@@ -293,95 +294,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   <YAxis dataKey="projectName" type="category" tick={{fontSize: 10, fontWeight: 700}} axisLine={false} width={80} />
                   <Tooltip contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}} />
                   <Legend iconType="circle" />
-                  {horizontalProjectData.agents.map((agent, i) => (
-                    <Bar key={agent} dataKey={agent} fill={colors[i % colors.length]} radius={[0, 5, 5, 0]} />
+                  {TIME_SLOTS.map((slot) => (
+                    <Bar key={slot} dataKey={slot} fill={SLOT_COLORS[slot]} radius={[0, 5, 5, 0]} />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-
-        {/* Unique Active Agents per Project Section (Pie + Table) */}
-        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col">
-          <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-8 flex items-center gap-2">
-            <i className="bi bi-pie-chart-fill text-amber-500"></i> Active Agents Distribution & Project Registry
-          </h4>
-          
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
-            {/* Pie Chart Column */}
-            <div className="lg:col-span-5 h-[350px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={agentsDetailByProject}
-                    dataKey="agentCount"
-                    nameKey="projectName"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    // Fix: Use 'name' and cast to any to resolve PieLabelRenderProps error
-                    label={({ name, percent }: any) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                  >
-                    {agentsDetailByProject.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={colors[index % colors.length]} strokeWidth={0} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Table Column */}
-            <div className="lg:col-span-7 overflow-hidden">
-              <div className="rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      <th className="px-6 py-4">Project</th>
-                      <th className="px-6 py-4 text-center">Count</th>
-                      <th className="px-6 py-4">Active Agent Names</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {agentsDetailByProject.map((p, idx) => (
-                      <tr key={p.projectName} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors[idx % colors.length] }}></div>
-                            <span className="text-sm font-black text-slate-900">{p.projectName}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <span className="inline-block px-3 py-1 bg-slate-100 rounded-lg text-xs font-black text-slate-600">
-                            {p.agentCount}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-wrap gap-1.5">
-                            {p.agentNames.map(name => (
-                              <span key={name} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-md border border-indigo-100">
-                                {name}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {agentsDetailByProject.length === 0 && (
-                      <tr>
-                        <td colSpan={3} className="px-6 py-10 text-center text-slate-400 italic text-sm">
-                          No active agents in the selected range.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
             </div>
           </div>
         </div>

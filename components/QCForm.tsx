@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { User, UserRole, QCRecord, SubSampleRecord, AgentReviewStatus, EvaluationSlot } from '../types';
+import React, { useState, useEffect } from 'react';
+import { User, UserRole, QCRecord, SubSampleRecord, AgentReviewStatus } from '../types';
 import { getUsers, saveRecord, getRecords } from '../store';
-import { PROJECTS, QC_ERRORS, HOURS, MINUTES, EVALUATION_SLOTS } from '../constants.tsx';
+import { PROJECTS, QC_ERRORS, TIME_SLOTS } from '../constants.tsx';
 
 interface QCFormProps {
   user: User;
@@ -12,17 +12,11 @@ interface QCFormProps {
 
 const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
   const allUsers = getUsers();
-  const allRecords = getRecords();
-
-  const [formData, setFormData] = useState<Partial<QCRecord>>({
+  
+  const initialFormData = (): Partial<QCRecord> => ({
     id: Math.random().toString(36).substr(2, 9),
     date: new Date().toISOString().split('T')[0],
-    time: { 
-      hr: new Date().getHours() > 12 ? (new Date().getHours() - 12).toString().padStart(2, '0') : (new Date().getHours() === 0 ? '12' : new Date().getHours().toString().padStart(2, '0')), 
-      min: new Date().getMinutes().toString().padStart(2, '0'), 
-      period: new Date().getHours() >= 12 ? 'PM' : 'AM' 
-    },
-    evaluationSlot: '12 PM',
+    timeSlot: TIME_SLOTS[0],
     agentName: '',
     tlName: '',
     managerName: '',
@@ -42,6 +36,8 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
     agentReviewStatus: AgentReviewStatus.PENDING
   });
 
+  const [formData, setFormData] = useState<Partial<QCRecord>>(initialFormData());
+
   useEffect(() => {
     if (editId) {
       const records = getRecords();
@@ -55,20 +51,6 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
   const managers = allUsers.filter(u => u.role === UserRole.MANAGER).map(u => u.name);
   const agents = allUsers.filter(u => u.role === UserRole.AGENT).map(u => u.name);
   const qcAgents = allUsers.filter(u => u.role === UserRole.QC_AGENT || u.role === UserRole.MANAGER).map(u => u.name);
-
-  const availableSlots = useMemo(() => {
-    if (!formData.agentName || !formData.date) return EVALUATION_SLOTS;
-    const takenSlots = allRecords
-      .filter(r => r.agentName === formData.agentName && r.date === formData.date && r.id !== editId)
-      .map(r => r.evaluationSlot);
-    return EVALUATION_SLOTS.filter(slot => !takenSlots.includes(slot));
-  }, [formData.agentName, formData.date, allRecords, editId]);
-
-  useEffect(() => {
-    if (!editId && formData.agentName && availableSlots.length > 0 && !availableSlots.includes(formData.evaluationSlot!)) {
-      setFormData(prev => ({ ...prev, evaluationSlot: availableSlots[0] }));
-    }
-  }, [availableSlots, editId, formData.agentName]);
 
   const generateSampling = () => {
     if (!formData.qcCodeRangeStart || !formData.qcCodeRangeEnd) {
@@ -151,20 +133,11 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
         return;
       }
     }
-    const records = getRecords();
-    if (!editId) {
-      const duplicate = records.find(r => 
-        r.agentName === formData.agentName && 
-        r.date === formData.date && 
-        r.evaluationSlot === formData.evaluationSlot
-      );
-      if (duplicate) {
-        alert(`Error: A record for ${formData.agentName} during the ${formData.evaluationSlot} slot already exists for ${formData.date}.`);
-        return;
-      }
-    }
+
     const finalData = { ...formData, createdAt: Date.now() };
+    const records = getRecords();
     const existing = editId ? records.find(r => r.id === editId) : null;
+
     if (!editId) {
       finalData.originalScore = finalData.avgScore || 100;
     } else if (existing) {
@@ -174,39 +147,23 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
         finalData.originalScore = finalData.avgScore || 100;
       }
     }
+
     saveRecord(finalData as QCRecord);
     onComplete();
   };
 
-  const updateTimeField = (field: 'hr' | 'min' | 'period', value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      time: {
-        ...prev.time!,
-        [field]: value
-      }
-    }));
-  };
-
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-20">
+    <div className="max-w-6xl mx-auto space-y-6 pb-20 relative">
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="bg-slate-900 px-8 py-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className={`w-3 h-3 rounded-full ${editId ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></div>
             <h2 className="text-white font-bold text-lg">
-              {editId ? 'Update Audit Entry' : 'New Daily Audit'}
+              {editId ? 'Update Audit Entry' : 'Fill Daily Audit'}
             </h2>
           </div>
-          <div className="flex gap-2 items-center">
-            {editId && (
-              <span className="bg-amber-500/20 text-amber-400 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-amber-500/30 mr-2">
-                Editing Mode
-              </span>
-            )}
-            <span className="bg-indigo-500 text-white px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-sm">
-              Daily Slot: {formData.evaluationSlot}
-            </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-2">One task per submission</span>
           </div>
         </div>
 
@@ -217,33 +174,16 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
               <input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-100" required />
             </div>
 
-            {/* Manual Time Selector Dropdowns */}
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Audit Precise Time</label>
-              <div className="flex gap-1.5 p-1 bg-slate-50 border border-slate-200 rounded-xl">
-                <select 
-                  value={formData.time?.hr} 
-                  onChange={e => updateTimeField('hr', e.target.value)} 
-                  className="flex-1 bg-white border border-slate-100 px-2 py-2 rounded-lg text-sm font-bold outline-none focus:border-indigo-300"
-                >
-                  {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
-                </select>
-                <select 
-                  value={formData.time?.min} 
-                  onChange={e => updateTimeField('min', e.target.value)} 
-                  className="flex-1 bg-white border border-slate-100 px-2 py-2 rounded-lg text-sm font-bold outline-none focus:border-indigo-300"
-                >
-                  {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-                <select 
-                  value={formData.time?.period} 
-                  onChange={e => updateTimeField('period', e.target.value)} 
-                  className="flex-1 bg-slate-900 text-white border-none px-2 py-2 rounded-lg text-[10px] font-black uppercase outline-none"
-                >
-                  <option value="AM">AM</option>
-                  <option value="PM">PM</option>
-                </select>
-              </div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Evaluation Time Slot</label>
+              <select 
+                value={formData.timeSlot} 
+                onChange={e => setFormData({ ...formData, timeSlot: e.target.value })} 
+                className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-100 font-bold"
+                required
+              >
+                {TIME_SLOTS.map(slot => <option key={slot} value={slot}>{slot}</option>)}
+              </select>
             </div>
 
             <div>
@@ -255,37 +195,18 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Daily Audit Window</label>
-              <select 
-                value={formData.evaluationSlot} 
-                onChange={e => setFormData({ ...formData, evaluationSlot: e.target.value as EvaluationSlot })} 
-                className={`w-full px-4 py-3 border rounded-xl font-black outline-none transition-colors ${availableSlots.length === 0 ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-indigo-50 border-indigo-200 text-indigo-700'}`} 
-                required
-                disabled={!formData.agentName}
-              >
-                {!formData.agentName && <option value="">Select Agent First</option>}
-                {availableSlots.map(slot => (
-                  <option key={slot} value={slot}>{slot} Evaluation</option>
-                ))}
-                {editId && !availableSlots.includes(formData.evaluationSlot!) && (
-                   <option value={formData.evaluationSlot}>{formData.evaluationSlot} Evaluation (Current)</option>
-                )}
-              </select>
-            </div>
-
-            <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Campaign Project</label>
               <select value={formData.projectName} onChange={e => setFormData({ ...formData, projectName: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required>
                 {PROJECTS.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
 
-            <div className="md:col-span-1">
+            <div className="md:col-span-2">
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Task / File Name</label>
-              <input type="text" value={formData.taskName} onChange={e => setFormData({ ...formData, taskName: e.target.value })} placeholder="Task name..." className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required />
+              <input type="text" value={formData.taskName} onChange={e => setFormData({ ...formData, taskName: e.target.value })} placeholder="Enter unique task ID or name..." className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-100" required />
             </div>
             
-            <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-slate-100 pt-6">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Lead / Manager</label>
                 <select value={formData.managerName} onChange={e => setFormData({ ...formData, managerName: e.target.value, tlName: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required>
@@ -302,12 +223,12 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-6 bg-slate-900 text-white p-6 rounded-2xl">
+          <div className="flex flex-wrap gap-6 bg-slate-900 text-white p-6 rounded-2xl shadow-lg">
             <label className="flex items-center gap-3 cursor-pointer group">
               <input type="checkbox" checked={formData.reworkStatus} onChange={e => setFormData({ ...formData, reworkStatus: e.target.checked })} className="w-5 h-5 rounded border-slate-700 bg-slate-800 text-rose-500 focus:ring-rose-500" />
               <div className="flex flex-col">
                 <span className="text-sm font-black uppercase tracking-tight group-hover:text-rose-400">Perform Rework Audit</span>
-                <span className="text-[10px] text-slate-400">This will link the previous record</span>
+                <span className="text-[10px] text-slate-400">Mark as corrected version</span>
               </div>
             </label>
             <div className="w-px bg-slate-800 h-10"></div>
@@ -359,7 +280,7 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
                         </tr>
                       ))}
                       <tr className="bg-slate-900 text-white">
-                        <td colSpan={QC_ERRORS.length + 2} className="px-6 py-6 text-right font-black uppercase text-xs tracking-widest">Aggregate Score</td>
+                        <td colSpan={QC_ERRORS.length + 2} className="px-6 py-6 text-right font-black uppercase text-xs tracking-widest">Aggregate Task Score</td>
                         <td className="px-6 py-6 text-right text-3xl font-black text-emerald-400">{formData.avgScore}%</td>
                       </tr>
                     </tbody>
@@ -371,14 +292,23 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
 
           <div className="space-y-3 pt-4">
             <label className="block text-sm font-bold text-slate-700 uppercase">Coaching Feedback & Notes (Mandatory)</label>
-            <textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 min-h-[140px]" placeholder="Explain findings..." required />
+            <textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 min-h-[140px] focus:ring-2 focus:ring-indigo-100 outline-none transition-all" placeholder="Explain findings..." required />
           </div>
 
-          <div className="flex gap-4">
-            <button type="submit" className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-black py-5 rounded-2xl shadow-xl shadow-indigo-100 transition-all hover:scale-[1.01] active:scale-[0.99]" disabled={formData.agentName && availableSlots.length === 0 && !editId}>
-              {editId ? 'Apply Updates & Save' : 'Submit Daily Audit'}
+          <div className="flex flex-col sm:flex-row gap-4">
+            <button 
+              type="submit" 
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-black py-5 rounded-2xl shadow-xl shadow-indigo-100 transition-all hover:scale-[1.01] active:scale-[0.99]"
+            >
+              {editId ? 'Update Audit' : 'Submit Audit'}
             </button>
-            <button type="button" onClick={onComplete} className="px-10 bg-slate-200 text-slate-700 font-black py-5 rounded-2xl hover:bg-slate-300 transition-colors">Discard</button>
+            <button 
+              type="button" 
+              onClick={onComplete} 
+              className="px-10 bg-slate-200 text-slate-700 font-black py-5 rounded-2xl hover:bg-slate-300 transition-colors"
+            >
+              Discard
+            </button>
           </div>
         </form>
       </div>

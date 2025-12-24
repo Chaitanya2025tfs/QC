@@ -1,5 +1,5 @@
 
-import { QCError, UserRole, User, EvaluationSlot } from './types';
+import { QCError, UserRole, User } from './types';
 
 export const INITIAL_USERS: User[] = [
   { id: 'u1', name: 'Mohsin', role: UserRole.MANAGER },
@@ -16,7 +16,7 @@ export const INITIAL_USERS: User[] = [
 
 export const PROJECTS = ['Moveeasy', 'Mfund', 'Altrum'];
 
-export const EVALUATION_SLOTS: EvaluationSlot[] = ['12 PM', '4 PM', '6 PM'];
+export const TIME_SLOTS = ['12 PM', '4 PM', '6 PM'];
 
 export const QC_ERRORS: QCError[] = [
   { id: 'fmt1', name: 'Typo / Grammar Error', category: 'FORMATTING', weight: -5 },
@@ -28,6 +28,3 @@ export const QC_ERRORS: QCError[] = [
   { id: 'src1', name: 'Invalid Source Link', category: 'SOURCE', weight: -10 },
   { id: 'src2', name: 'Source Date Outdated', category: 'SOURCE', weight: -5 },
 ];
-
-export const HOURS = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'));
-export const MINUTES = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));

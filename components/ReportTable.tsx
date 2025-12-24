@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
-import { User, UserRole, QCRecord, AgentReviewStatus } from '../types';
-import { getRecords, deleteRecord, saveRecord } from '../store';
+import { User, UserRole, QCRecord } from '../types';
+import { getRecords, deleteRecord } from '../store';
 import { QC_ERRORS, PROJECTS } from '../constants.tsx';
 
 interface DisplayRecord extends QCRecord {
@@ -23,9 +23,7 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
 
   const displayData = useMemo(() => {
     const filtered = records.filter(r => {
-      // Agents only see themselves
       if (user.role === UserRole.AGENT && r.agentName !== user.name) return false;
-      
       const matchesSearch = r.agentName.toLowerCase().includes(searchTerm.toLowerCase()) || 
                             r.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                             r.taskName.toLowerCase().includes(searchTerm.toLowerCase());
@@ -35,7 +33,6 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
 
     const flatList: DisplayRecord[] = [];
     filtered.forEach(record => {
-      // Regular Entry
       flatList.push({
         ...record,
         _displayType: 'Regular',
@@ -43,7 +40,6 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
         _isReworkRow: false
       });
 
-      // Rework Entry (only if reworkStatus is true)
       if (record.reworkStatus) {
         flatList.push({
           ...record,
@@ -58,7 +54,7 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
   }, [records, searchTerm, projectFilter, user]);
 
   const handleDelete = (id: string) => {
-    if (window.confirm("CRITICAL: Delete this audit record? This will permanently remove both regular and rework files associated with this entry.")) {
+    if (window.confirm("CRITICAL: Delete this audit record?")) {
       deleteRecord(id);
       setRecords(getRecords());
     }
@@ -68,9 +64,8 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
     const headers = ["Field", "Value"];
     const rows = [
       ["Audit Type", r._displayType],
-      ["Daily Slot", r.evaluationSlot],
       ["Date", r.date],
-      ["Record Time", `${r.time.hr}:${r.time.min} ${r.time.period}`],
+      ["Time Slot", r.timeSlot],
       ["Agent Name", r.agentName],
       ["Project", r.projectName],
       ["Task/File Name", r.taskName],
@@ -102,12 +97,11 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
   };
 
   const handleDownloadExcel = () => {
-    const headers = ["Type", "Slot", "Date", "Record Time", "Agent", "Project", "Task", "QC Score", "QC Checker"];
+    const headers = ["Type", "Date", "Time Slot", "Agent", "Project", "Task", "QC Score", "QC Checker"];
     const csvContent = [headers.join(","), ...displayData.map(r => [
       r._displayType,
-      r.evaluationSlot,
       r.date, 
-      `${r.time.hr}:${r.time.min} ${r.time.period}`,
+      r.timeSlot,
       r.agentName, 
       r.projectName, 
       `"${r.taskName}"`,
@@ -153,8 +147,8 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
           <table className="w-full text-left">
             <thead>
               <tr className="bg-slate-50 border-b text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                <th className="px-6 py-5">Daily Slot</th>
-                <th className="px-6 py-5">Record Time</th>
+                <th className="px-6 py-5">Record Date</th>
+                <th className="px-6 py-5">Time Slot</th>
                 <th className="px-6 py-5">Audit Type</th>
                 <th className="px-6 py-5">Project / Task</th>
                 <th className="px-6 py-5">Agent</th>
@@ -167,13 +161,10 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
               {displayData.map((row) => (
                 <tr key={`${row.id}-${row._displayType}`} className={`group transition-colors ${row._isReworkRow ? 'bg-indigo-50/20' : 'hover:bg-slate-50'}`}>
                   <td className="px-6 py-4">
-                    <span className="text-[10px] font-black px-2 py-1 bg-indigo-100 text-indigo-700 rounded-lg">{row.evaluationSlot}</span>
+                    <span className="text-xs font-bold text-slate-700">{row.date}</span>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold text-slate-700">{row.date}</span>
-                      <span className="text-[9px] text-slate-400 font-black uppercase">{row.time.hr}:{row.time.min} {row.time.period}</span>
-                    </div>
+                    <span className="text-[11px] text-slate-900 font-black uppercase tracking-tight">{row.timeSlot}</span>
                   </td>
                   <td className="px-6 py-4">
                     <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border ${
@@ -234,8 +225,8 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-2xl text-white"><i className="bi bi-file-earmark-check"></i></div>
                 <div>
-                  <h3 className="text-white text-xl font-black">{viewingRecord._displayType} Audit - {viewingRecord.evaluationSlot} Window</h3>
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{viewingRecord.projectName} | {viewingRecord.agentName} | Recorded at {viewingRecord.time.hr}:{viewingRecord.time.min} {viewingRecord.time.period}</p>
+                  <h3 className="text-white text-xl font-black">{viewingRecord._displayType} Audit Record</h3>
+                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{viewingRecord.projectName} | {viewingRecord.agentName} | Time Slot: {viewingRecord.timeSlot}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -246,7 +237,7 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
               </div>
             </div>
             <div className="p-8 overflow-y-auto custom-scrollbar flex-1 space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
                   <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Row Score</p>
                   <p className="text-2xl font-black text-indigo-600">{viewingRecord._displayScore}{viewingRecord._displayScore !== 'N/A' ? '%' : ''}</p>
@@ -258,10 +249,6 @@ const ReportTable: React.FC<ReportTableProps> = ({ user, onEdit }) => {
                 <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
                   <p className="text-[10px] font-black text-slate-400 uppercase mb-1">QC Checker</p>
                   <p className="text-xs font-bold text-slate-800">{viewingRecord.qcCheckerName}</p>
-                </div>
-                <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
-                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Slot Window</p>
-                  <p className="text-xs font-black text-indigo-600 uppercase">{viewingRecord.evaluationSlot}</p>
                 </div>
               </div>
               {!viewingRecord.noWork && (
