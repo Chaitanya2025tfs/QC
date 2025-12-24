@@ -18,7 +18,7 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
     id: Math.random().toString(36).substr(2, 9),
     date: new Date().toISOString().split('T')[0],
     time: { 
-      hr: new Date().getHours() > 12 ? (new Date().getHours() - 12).toString().padStart(2, '0') : new Date().getHours().toString().padStart(2, '0'), 
+      hr: new Date().getHours() > 12 ? (new Date().getHours() - 12).toString().padStart(2, '0') : (new Date().getHours() === 0 ? '12' : new Date().getHours().toString().padStart(2, '0')), 
       min: new Date().getMinutes().toString().padStart(2, '0'), 
       period: new Date().getHours() >= 12 ? 'PM' : 'AM' 
     },
@@ -56,19 +56,14 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
   const agents = allUsers.filter(u => u.role === UserRole.AGENT).map(u => u.name);
   const qcAgents = allUsers.filter(u => u.role === UserRole.QC_AGENT || u.role === UserRole.MANAGER).map(u => u.name);
 
-  // Filter available slots for the selected agent and date
   const availableSlots = useMemo(() => {
     if (!formData.agentName || !formData.date) return EVALUATION_SLOTS;
-    
-    // Find all slots taken by this agent on this day
     const takenSlots = allRecords
       .filter(r => r.agentName === formData.agentName && r.date === formData.date && r.id !== editId)
       .map(r => r.evaluationSlot);
-
     return EVALUATION_SLOTS.filter(slot => !takenSlots.includes(slot));
   }, [formData.agentName, formData.date, allRecords, editId]);
 
-  // If the current slot is not in available slots, reset it to the first available one (if not editing)
   useEffect(() => {
     if (!editId && formData.agentName && availableSlots.length > 0 && !availableSlots.includes(formData.evaluationSlot!)) {
       setFormData(prev => ({ ...prev, evaluationSlot: availableSlots[0] }));
@@ -80,25 +75,19 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
       alert("Please enter both start and end QC codes.");
       return;
     }
-
     const startMatch = formData.qcCodeRangeStart.match(/\d+$/);
     const endMatch = formData.qcCodeRangeEnd.match(/\d+$/);
-
     if (!startMatch || !endMatch) {
       alert("QC codes must end with numeric values (e.g., Altrum/01)");
       return;
     }
-
     const startNum = parseInt(startMatch[0]);
     const endNum = parseInt(endMatch[0]);
     const base = formData.qcCodeRangeStart.replace(/\d+$/, '');
-
     const totalInRange = Math.abs(endNum - startNum) + 1;
     const sampleSize = Math.max(1, Math.ceil(totalInRange * 0.1));
-
     const samples: SubSampleRecord[] = [];
     const usedIndices = new Set<number>();
-
     while (samples.length < sampleSize) {
       const randomNum = Math.floor(Math.random() * totalInRange) + Math.min(startNum, endNum);
       if (!usedIndices.has(randomNum)) {
@@ -111,12 +100,7 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
         });
       }
     }
-
-    setFormData(prev => ({ 
-      ...prev, 
-      subSamples: samples, 
-      avgScore: 100 
-    }));
+    setFormData(prev => ({ ...prev, subSamples: samples, avgScore: 100 }));
   };
 
   const calculateSampleScore = (errors: string[]) => {
@@ -131,17 +115,14 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
   const handleSubSampleErrorToggle = (sampleIdx: number, errorId: string) => {
     const updatedSamples = [...(formData.subSamples || [])];
     const sample = { ...updatedSamples[sampleIdx] };
-    
     if (sample.errors.includes(errorId)) {
       sample.errors = sample.errors.filter(e => e !== errorId);
     } else {
       sample.errors = [...sample.errors, errorId];
     }
-    
     sample.noError = sample.errors.length === 0;
     sample.score = calculateSampleScore(sample.errors);
     updatedSamples[sampleIdx] = sample;
-
     const avg = updatedSamples.reduce((acc, s) => acc + s.score, 0) / updatedSamples.length;
     setFormData(prev => ({ ...prev, subSamples: updatedSamples, avgScore: parseFloat(avg.toFixed(1)) }));
   };
@@ -170,26 +151,20 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
         return;
       }
     }
-
     const records = getRecords();
-
-    // Final safety check for duplicates
     if (!editId) {
       const duplicate = records.find(r => 
         r.agentName === formData.agentName && 
         r.date === formData.date && 
         r.evaluationSlot === formData.evaluationSlot
       );
-
       if (duplicate) {
         alert(`Error: A record for ${formData.agentName} during the ${formData.evaluationSlot} slot already exists for ${formData.date}.`);
         return;
       }
     }
-
     const finalData = { ...formData, createdAt: Date.now() };
     const existing = editId ? records.find(r => r.id === editId) : null;
-
     if (!editId) {
       finalData.originalScore = finalData.avgScore || 100;
     } else if (existing) {
@@ -199,9 +174,18 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
         finalData.originalScore = finalData.avgScore || 100;
       }
     }
-
     saveRecord(finalData as QCRecord);
     onComplete();
+  };
+
+  const updateTimeField = (field: 'hr' | 'min' | 'period', value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      time: {
+        ...prev.time!,
+        [field]: value
+      }
+    }));
   };
 
   return (
@@ -233,20 +217,43 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
               <input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-100" required />
             </div>
 
-            {/* Agent Name Swapped to 2nd position */}
+            {/* Manual Time Selector Dropdowns */}
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Audit Precise Time</label>
+              <div className="flex gap-1.5 p-1 bg-slate-50 border border-slate-200 rounded-xl">
+                <select 
+                  value={formData.time?.hr} 
+                  onChange={e => updateTimeField('hr', e.target.value)} 
+                  className="flex-1 bg-white border border-slate-100 px-2 py-2 rounded-lg text-sm font-bold outline-none focus:border-indigo-300"
+                >
+                  {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <select 
+                  value={formData.time?.min} 
+                  onChange={e => updateTimeField('min', e.target.value)} 
+                  className="flex-1 bg-white border border-slate-100 px-2 py-2 rounded-lg text-sm font-bold outline-none focus:border-indigo-300"
+                >
+                  {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select 
+                  value={formData.time?.period} 
+                  onChange={e => updateTimeField('period', e.target.value)} 
+                  className="flex-1 bg-slate-900 text-white border-none px-2 py-2 rounded-lg text-[10px] font-black uppercase outline-none"
+                >
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Agent Name</label>
               <select value={formData.agentName} onChange={e => setFormData({ ...formData, agentName: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required>
                 <option value="">Choose Agent...</option>
-                {agents.map(a => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
+                {agents.map(a => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
 
-            {/* Daily Audit Window (Slot/Time) Swapped to 3rd position */}
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Daily Audit Window</label>
               <select 
@@ -264,9 +271,6 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
                    <option value={formData.evaluationSlot}>{formData.evaluationSlot} Evaluation (Current)</option>
                 )}
               </select>
-              {formData.agentName && availableSlots.length === 0 && (
-                <p className="text-[10px] text-rose-500 font-bold mt-1 uppercase tracking-tight">All daily slots completed for this agent.</p>
-              )}
             </div>
 
             <div>
@@ -276,9 +280,9 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
               </select>
             </div>
 
-            <div className="md:col-span-2">
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Task / File Name Audited</label>
-              <input type="text" value={formData.taskName} onChange={e => setFormData({ ...formData, taskName: e.target.value })} placeholder="Enter specific task name..." className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required />
+            <div className="md:col-span-1">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Task / File Name</label>
+              <input type="text" value={formData.taskName} onChange={e => setFormData({ ...formData, taskName: e.target.value })} placeholder="Task name..." className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required />
             </div>
             
             <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -303,7 +307,7 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
               <input type="checkbox" checked={formData.reworkStatus} onChange={e => setFormData({ ...formData, reworkStatus: e.target.checked })} className="w-5 h-5 rounded border-slate-700 bg-slate-800 text-rose-500 focus:ring-rose-500" />
               <div className="flex flex-col">
                 <span className="text-sm font-black uppercase tracking-tight group-hover:text-rose-400">Perform Rework Audit</span>
-                <span className="text-[10px] text-slate-400">This will link the previous record with the new rework file</span>
+                <span className="text-[10px] text-slate-400">This will link the previous record</span>
               </div>
             </label>
             <div className="w-px bg-slate-800 h-10"></div>
@@ -320,12 +324,11 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
                   <i className="bi bi-search text-indigo-500"></i> Audit Protocol (10% Sampling)
                 </h3>
               </div>
-              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <input type="text" value={formData.qcCodeRangeStart} onChange={e => setFormData({ ...formData, qcCodeRangeStart: e.target.value })} placeholder="Code Start (e.g. Altrum/01)" className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200" />
                 <input type="text" value={formData.qcCodeRangeEnd} onChange={e => setFormData({ ...formData, qcCodeRangeEnd: e.target.value })} placeholder="Code End (e.g. Altrum/100)" className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200" />
                 <button type="button" onClick={generateSampling} className="md:col-span-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-black py-4 rounded-xl border-2 border-dashed border-indigo-200 transition-all">
-                  Generate 10% Samples (Default 100%)
+                  Generate 10% Samples
                 </button>
               </div>
 
@@ -368,7 +371,7 @@ const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
 
           <div className="space-y-3 pt-4">
             <label className="block text-sm font-bold text-slate-700 uppercase">Coaching Feedback & Notes (Mandatory)</label>
-            <textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 min-h-[140px]" placeholder="Explain audit findings for the agent..." required />
+            <textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 min-h-[140px]" placeholder="Explain findings..." required />
           </div>
 
           <div className="flex gap-4">
