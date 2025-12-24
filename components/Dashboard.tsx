@@ -1,10 +1,10 @@
-
 import React, { useMemo, useState } from 'react';
 import { getRecords, getUsers } from '../store';
 import { User, UserRole, QCRecord, EvaluationSlot } from '../types';
 import { PROJECTS, EVALUATION_SLOTS } from '../constants.tsx';
 import { 
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell 
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
+  PieChart, Pie
 } from 'recharts';
 
 interface DashboardProps {
@@ -122,19 +122,20 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     };
   }, [filteredRecords]);
 
-  // Unique Active Agents per Project
-  const agentsCountByProject = useMemo(() => {
+  // Unique Active Agents Details per Project
+  const agentsDetailByProject = useMemo(() => {
     return PROJECTS.map(proj => {
-      const uniqueAgents = new Set(
+      const uniqueAgents = Array.from(new Set(
         filteredRecords
           .filter(r => r.projectName === proj)
           .map(r => r.agentName)
-      );
+      )).sort();
       return {
         projectName: proj,
-        agentCount: uniqueAgents.size
+        agentCount: uniqueAgents.length,
+        agentNames: uniqueAgents
       };
-    });
+    }).filter(p => p.agentCount > 0);
   }, [filteredRecords]);
 
   const colors = ['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#475569', '#9333ea'];
@@ -301,28 +302,86 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
           </div>
         </div>
 
-        {/* Unique Active Agents per Project Chart */}
-        <div className="grid grid-cols-1 gap-8">
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
-            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6"><i className="bi bi-people-fill text-amber-500 mr-2"></i> Active Agents Distribution per Project</h4>
-            <div className="flex-1 min-h-0">
+        {/* Unique Active Agents per Project Section (Pie + Table) */}
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col">
+          <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-8 flex items-center gap-2">
+            <i className="bi bi-pie-chart-fill text-amber-500"></i> Active Agents Distribution & Project Registry
+          </h4>
+          
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+            {/* Pie Chart Column */}
+            <div className="lg:col-span-5 h-[350px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={agentsCountByProject} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                  <XAxis dataKey="projectName" tick={{fontSize: 11, fontWeight: 800}} axisLine={false} />
-                  <YAxis allowDecimals={false} tick={{fontSize: 11, fontWeight: 800}} axisLine={false} />
+                <PieChart>
+                  <Pie
+                    data={agentsDetailByProject}
+                    dataKey="agentCount"
+                    nameKey="projectName"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={100}
+                    paddingAngle={5}
+                    // Fix: Use 'name' and cast to any to resolve PieLabelRenderProps error
+                    label={({ name, percent }: any) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                  >
+                    {agentsDetailByProject.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={colors[index % colors.length]} strokeWidth={0} />
+                    ))}
+                  </Pie>
                   <Tooltip 
-                    cursor={{fill: '#f8fafc'}}
                     contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}}
                   />
-                  <Legend verticalAlign="top" height={36}/>
-                  <Bar dataKey="agentCount" name="Unique Active Agents" fill="#f59e0b" radius={[12, 12, 0, 0]} barSize={60}>
-                    {agentsCountByProject.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
+                </PieChart>
               </ResponsiveContainer>
+            </div>
+
+            {/* Table Column */}
+            <div className="lg:col-span-7 overflow-hidden">
+              <div className="rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      <th className="px-6 py-4">Project</th>
+                      <th className="px-6 py-4 text-center">Count</th>
+                      <th className="px-6 py-4">Active Agent Names</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {agentsDetailByProject.map((p, idx) => (
+                      <tr key={p.projectName} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors[idx % colors.length] }}></div>
+                            <span className="text-sm font-black text-slate-900">{p.projectName}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className="inline-block px-3 py-1 bg-slate-100 rounded-lg text-xs font-black text-slate-600">
+                            {p.agentCount}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            {p.agentNames.map(name => (
+                              <span key={name} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-md border border-indigo-100">
+                                {name}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {agentsDetailByProject.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-6 py-10 text-center text-slate-400 italic text-sm">
+                          No active agents in the selected range.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
