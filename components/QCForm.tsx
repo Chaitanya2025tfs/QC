@@ -1,0 +1,296 @@
+
+import React, { useState, useEffect } from 'react';
+import { User, UserRole, QCRecord, SubSampleRecord } from '../types';
+import { getUsers, saveRecord, getRecords } from '../store';
+import { PROJECTS, QC_ERRORS, HOURS, MINUTES } from '../constants.tsx';
+
+interface QCFormProps {
+  user: User;
+  editId: string | null;
+  onComplete: () => void;
+}
+
+const QCForm: React.FC<QCFormProps> = ({ user, editId, onComplete }) => {
+  const allUsers = getUsers();
+  const records = getRecords();
+
+  const [formData, setFormData] = useState<Partial<QCRecord>>({
+    id: Math.random().toString(36).substr(2, 9),
+    date: new Date().toISOString().split('T')[0],
+    time: { hr: '09', min: '00', period: 'AM' },
+    agentName: '',
+    tlName: '',
+    managerName: '',
+    qcCheckerName: user.name,
+    projectName: PROJECTS[0],
+    taskName: '',
+    reworkStatus: false,
+    noWork: false,
+    noAttachment: false,
+    notes: '',
+    qcCodeRangeStart: '',
+    qcCodeRangeEnd: '',
+    subSamples: [],
+    avgScore: 100,
+    createdAt: Date.now()
+  });
+
+  useEffect(() => {
+    if (editId) {
+      const record = records.find(r => r.id === editId);
+      if (record) setFormData(record);
+    }
+  }, [editId]);
+
+  const managers = allUsers.filter(u => u.role === UserRole.MANAGER).map(u => u.name);
+  const agents = allUsers.filter(u => u.role === UserRole.AGENT).map(u => u.name);
+  const qcAgents = allUsers.filter(u => u.role === UserRole.QC_AGENT || u.role === UserRole.MANAGER).map(u => u.name);
+
+  const generateSampling = () => {
+    if (!formData.qcCodeRangeStart || !formData.qcCodeRangeEnd) {
+      alert("Please enter both start and end QC codes.");
+      return;
+    }
+
+    const startMatch = formData.qcCodeRangeStart.match(/\d+$/);
+    const endMatch = formData.qcCodeRangeEnd.match(/\d+$/);
+
+    if (!startMatch || !endMatch) {
+      alert("QC codes must end with numeric values (e.g., Altrum/01)");
+      return;
+    }
+
+    const startNum = parseInt(startMatch[0]);
+    const endNum = parseInt(endMatch[0]);
+    const base = formData.qcCodeRangeStart.replace(/\d+$/, '');
+
+    const totalInRange = Math.abs(endNum - startNum) + 1;
+    const sampleSize = Math.max(1, Math.ceil(totalInRange * 0.1));
+
+    const samples: SubSampleRecord[] = [];
+    const usedIndices = new Set<number>();
+
+    while (samples.length < sampleSize) {
+      const randomNum = Math.floor(Math.random() * totalInRange) + Math.min(startNum, endNum);
+      if (!usedIndices.has(randomNum)) {
+        usedIndices.add(randomNum);
+        samples.push({
+          qcCode: `${base}${randomNum.toString().padStart(startMatch[0].length, '0')}`,
+          errors: [],
+          noError: true,
+          score: 100
+        });
+      }
+    }
+
+    setFormData(prev => ({ ...prev, subSamples: samples }));
+  };
+
+  const calculateSampleScore = (errors: string[]) => {
+    let score = 100;
+    errors.forEach(errId => {
+      const error = QC_ERRORS.find(e => e.id === errId);
+      if (error) score += error.weight;
+    });
+    return Math.max(0, score);
+  };
+
+  const handleSubSampleErrorToggle = (sampleIdx: number, errorId: string) => {
+    const updatedSamples = [...(formData.subSamples || [])];
+    const sample = { ...updatedSamples[sampleIdx] };
+    
+    if (sample.errors.includes(errorId)) {
+      sample.errors = sample.errors.filter(e => e !== errorId);
+    } else {
+      sample.errors = [...sample.errors, errorId];
+    }
+    
+    sample.noError = sample.errors.length === 0;
+    sample.score = calculateSampleScore(sample.errors);
+    updatedSamples[sampleIdx] = sample;
+
+    const avg = updatedSamples.reduce((acc, s) => acc + s.score, 0) / updatedSamples.length;
+    setFormData(prev => ({ ...prev, subSamples: updatedSamples, avgScore: parseFloat(avg.toFixed(1)) }));
+  };
+
+  const handleNoErrorToggle = (sampleIdx: number) => {
+    const updatedSamples = [...(formData.subSamples || [])];
+    updatedSamples[sampleIdx] = {
+      ...updatedSamples[sampleIdx],
+      errors: [],
+      noError: true,
+      score: 100
+    };
+    const avg = updatedSamples.reduce((acc, s) => acc + s.score, 0) / updatedSamples.length;
+    setFormData(prev => ({ ...prev, subSamples: updatedSamples, avgScore: parseFloat(avg.toFixed(1)) }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.notes) {
+      alert("Comments section is mandatory.");
+      return;
+    }
+    if (!formData.subSamples || formData.subSamples.length === 0) {
+      if (!formData.noWork) {
+        alert("Please generate 10% sampling records first.");
+        return;
+      }
+    }
+    saveRecord(formData as QCRecord);
+    onComplete();
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-6 pb-20">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="bg-slate-900 px-8 py-4 flex items-center justify-between">
+          <h2 className="text-white font-bold text-lg">{editId ? 'Edit QC Report' : 'New QC Evaluation'}</h2>
+          {formData.reworkStatus && (
+            <span className="bg-amber-500 text-slate-900 px-3 py-1 rounded-full text-xs font-bold uppercase">Rework Entry</span>
+          )}
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-8 space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Date</label>
+              <input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Time ([hr]:[min] [AM/PM])</label>
+              <div className="flex gap-2">
+                <select value={formData.time?.hr} onChange={e => setFormData({ ...formData, time: { ...formData.time!, hr: e.target.value }})} className="flex-1 px-2 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none">
+                  {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <select value={formData.time?.min} onChange={e => setFormData({ ...formData, time: { ...formData.time!, min: e.target.value }})} className="flex-1 px-2 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none">
+                  {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select value={formData.time?.period} onChange={e => setFormData({ ...formData, time: { ...formData.time!, period: e.target.value as any }})} className="flex-1 px-2 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none">
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Agent Name</label>
+              <select value={formData.agentName} onChange={e => setFormData({ ...formData, agentName: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required>
+                <option value="">Select Agent...</option>
+                {agents.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Manager / TL Name</label>
+              <select value={formData.managerName} onChange={e => setFormData({ ...formData, managerName: e.target.value, tlName: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required>
+                <option value="">Select Manager...</option>
+                {managers.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Project Name</label>
+              <select value={formData.projectName} onChange={e => setFormData({ ...formData, projectName: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required>
+                {PROJECTS.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">QC Checker</label>
+              <select value={formData.qcCheckerName} onChange={e => setFormData({ ...formData, qcCheckerName: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required>
+                {qcAgents.map(qa => <option key={qa} value={qa}>{qa}</option>)}
+              </select>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Task Name</label>
+              <input type="text" value={formData.taskName} onChange={e => setFormData({ ...formData, taskName: e.target.value })} placeholder="Task description..." className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" required />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-6 bg-slate-50 p-4 rounded-xl border border-slate-100">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={formData.reworkStatus} onChange={e => setFormData({ ...formData, reworkStatus: e.target.checked })} className="w-5 h-5 rounded text-indigo-600" />
+              <span className="text-sm font-semibold">Rework Case</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={formData.noWork} onChange={e => setFormData({ ...formData, noWork: e.target.checked })} className="w-5 h-5 rounded text-indigo-600" />
+              <span className="text-sm font-semibold">No Work (Exclude)</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={formData.noAttachment} onChange={e => setFormData({ ...formData, noAttachment: e.target.checked })} className="w-5 h-5 rounded text-indigo-600" />
+              <span className="text-sm font-semibold">No Attachment</span>
+            </label>
+          </div>
+
+          {!formData.noWork && (
+            <div className="border-t border-slate-100 pt-8">
+              <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
+                <i className="bi bi-arrow-repeat text-indigo-500"></i> 10% Productivity Sampling
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <input type="text" value={formData.qcCodeRangeStart} onChange={e => setFormData({ ...formData, qcCodeRangeStart: e.target.value })} placeholder="Start Code (e.g. Altrum/01)" className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" />
+                <input type="text" value={formData.qcCodeRangeEnd} onChange={e => setFormData({ ...formData, qcCodeRangeEnd: e.target.value })} placeholder="End Code (e.g. Altrum/100)" className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 outline-none" />
+                <button type="button" onClick={generateSampling} className="md:col-span-2 bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
+                  <i className="bi bi-plus-circle"></i> Generate Sampling
+                </button>
+              </div>
+
+              {formData.subSamples && formData.subSamples.length > 0 && (
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase">
+                        <th className="px-4 py-3 text-left">QC Code</th>
+                        {QC_ERRORS.map(err => <th key={err.id} className="px-2 py-3 text-center">{err.name}</th>)}
+                        <th className="px-4 py-3 text-center">No Error</th>
+                        <th className="px-4 py-3 text-right">Score</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {formData.subSamples.map((sample, sIdx) => (
+                        <tr key={sIdx} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 text-sm font-medium">{sample.qcCode}</td>
+                          {QC_ERRORS.map(err => (
+                            <td key={err.id} className="px-2 py-3 text-center">
+                              <input type="checkbox" checked={sample.errors.includes(err.id)} onChange={() => handleSubSampleErrorToggle(sIdx, err.id)} className="w-4 h-4 rounded text-rose-600" />
+                            </td>
+                          ))}
+                          <td className="px-4 py-3 text-center">
+                            <input type="checkbox" checked={sample.noError} onChange={() => handleNoErrorToggle(sIdx)} className="w-4 h-4 rounded text-emerald-600" />
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-bold text-slate-900">{sample.score}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-slate-900">
+                        <td colSpan={QC_ERRORS.length + 2} className="px-4 py-4 text-right text-white font-bold text-sm">AVG SCORE:</td>
+                        <td className="px-4 py-4 text-right text-xl font-black text-emerald-400">{formData.avgScore}%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2 border-t border-slate-100 pt-8">
+            <label className="block text-sm font-bold text-slate-700">Comments (Mandatory)</label>
+            <textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 min-h-[120px]" required />
+          </div>
+
+          <div className="flex gap-4 pt-4">
+            <button type="submit" className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2">
+              <i className="bi bi-floppy"></i> {editId ? 'Update Report' : 'Save Report'}
+            </button>
+            <button type="button" onClick={onComplete} className="px-8 bg-slate-200 text-slate-700 font-bold py-4 rounded-xl">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default QCForm;
