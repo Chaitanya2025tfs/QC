@@ -6,6 +6,12 @@ export enum UserRole {
   AGENT = 'AGENT'
 }
 
+export enum AgentReviewStatus {
+  PENDING = 'PENDING',
+  ACKNOWLEDGED = 'ACKNOWLEDGED',
+  DISPUTED = 'DISPUTED'
+}
+
 export interface User {
   id: string;
   name: string;
@@ -26,6 +32,8 @@ export interface SubSampleRecord {
   score: number;
 }
 
+export type EvaluationSlot = '12 PM' | '4 PM' | '6 PM';
+
 export interface QCRecord {
   id: string;
   date: string;
@@ -34,6 +42,7 @@ export interface QCRecord {
     min: string;
     period: 'AM' | 'PM';
   };
+  evaluationSlot: EvaluationSlot; // New field for daily tracking
   tlName: string;
   agentName: string;
   managerName: string;
@@ -48,7 +57,10 @@ export interface QCRecord {
   qcCodeRangeEnd: string;
   subSamples: SubSampleRecord[];
   avgScore: number;
+  originalScore: number; 
   createdAt: number;
+  agentReviewStatus: AgentReviewStatus;
+  agentReviewNote?: string;
 }
 
 export interface ProjectStats {

@@ -1,8 +1,8 @@
 
 import React, { useMemo, useState } from 'react';
 import { getRecords, getUsers } from '../store';
-import { User, UserRole, QCRecord } from '../types';
-import { PROJECTS } from '../constants.tsx';
+import { User, UserRole, QCRecord, EvaluationSlot } from '../types';
+import { PROJECTS, EVALUATION_SLOTS } from '../constants.tsx';
 import { 
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell 
 } from 'recharts';
@@ -15,9 +15,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const records = getRecords();
   const allUsers = getUsers();
   
-  const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
+  const agentsList = useMemo(() => 
+    allUsers.filter(u => u.role === UserRole.AGENT).map(u => u.name), 
+    [allUsers]
+  );
+
+  const [selectedAgent, setSelectedAgent] = useState<string>(
+    user.role === UserRole.AGENT ? user.name : 'All'
+  );
+  
   const [dateRange, setDateRange] = useState({ 
-    start: new Date().toISOString().split('T')[0], 
+    start: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
     end: new Date().toISOString().split('T')[0] 
   });
   const [selectedProject, setSelectedProject] = useState<string>('All');
@@ -27,203 +35,296 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     return records.filter(r => {
       if (user.role === UserRole.AGENT && r.agentName !== user.name) return false;
       const inDate = r.date >= dateRange.start && r.date <= dateRange.end;
-      const inAgent = selectedAgents.length === 0 || selectedAgents.includes(r.agentName);
+      const inAgent = selectedAgent === 'All' || r.agentName === selectedAgent;
       const inProject = selectedProject === 'All' || r.projectName === selectedProject;
       return inDate && inAgent && inProject;
     });
-  }, [records, dateRange, selectedAgents, selectedProject, user]);
+  }, [records, dateRange, selectedAgent, selectedProject, user]);
 
   const kpis = useMemo(() => {
-    const validScores = filteredRecords.filter(r => !r.noWork).map(r => r.avgScore);
-    const avgScore = validScores.length > 0 ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1) : '0';
+    const originalScores = filteredRecords.filter(r => !r.noWork).map(r => r.originalScore ?? r.avgScore);
+    const mainAvg = originalScores.length > 0 ? (originalScores.reduce((a, b) => a + b, 0) / originalScores.length).toFixed(1) : '0';
+    const reworkScores = filteredRecords.filter(r => r.reworkStatus && !r.noWork).map(r => r.avgScore);
+    const reworkAvg = reworkScores.length > 0 ? (reworkScores.reduce((a, b) => a + b, 0) / reworkScores.length).toFixed(1) : '0';
     const activeProjectsCount = new Set(filteredRecords.map(r => r.projectName)).size;
     const activeAgentsCount = new Set(filteredRecords.map(r => r.agentName)).size;
-    return { avgScore, activeProjectsCount, activeAgentsCount };
+    return { mainAvg, reworkAvg, activeProjectsCount, activeAgentsCount };
   }, [filteredRecords]);
 
-  const lineChartData = useMemo(() => {
+  // For Trend Lines
+  const trendLineData = useMemo(() => {
     const dates = Array.from(new Set(filteredRecords.map(r => r.date))).sort();
-    return dates.map(d => {
-      const data: any = { date: d };
-      const agentsInDay = Array.from(new Set(filteredRecords.filter(r => r.date === d).map(r => r.agentName)));
-      agentsInDay.forEach(agent => {
-        const scores = filteredRecords.filter(r => r.date === d && r.agentName === agent && !r.noWork).map(r => r.avgScore);
-        if (scores.length > 0) {
-          data[agent] = parseFloat((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1));
-        }
+    const activeAgents = Array.from(new Set(filteredRecords.map(r => r.agentName)));
+    
+    const agentSlots: string[] = [];
+    activeAgents.forEach(agent => {
+      EVALUATION_SLOTS.forEach(slot => {
+        agentSlots.push(`${agent} (${slot})`);
       });
-      return data;
     });
-  }, [filteredRecords]);
 
-  const projectStats = useMemo(() => {
-    return PROJECTS.map(proj => {
-      const projRecords = filteredRecords.filter(r => r.projectName === proj);
-      const uniqueAgents = new Set(projRecords.map(r => r.agentName)).size;
-      return { projectName: proj, activeAgents: uniqueAgents };
-    });
-  }, [filteredRecords]);
-
-  const agentProjectData = useMemo(() => {
-    const data: any[] = [];
-    const agents = Array.from(new Set(filteredRecords.map(r => r.agentName)));
-    agents.forEach(agent => {
-      PROJECTS.forEach(proj => {
-        const scores = filteredRecords.filter(r => r.agentName === agent && r.projectName === proj && !r.noWork).map(r => r.avgScore);
-        if (scores.length > 0) {
-          data.push({
-            name: `${agent} - ${proj}`,
-            score: parseFloat((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1))
+    const processRecords = (type: 'regular' | 'rework') => {
+      return dates.map(d => {
+        const data: any = { date: d };
+        activeAgents.forEach(agent => {
+          EVALUATION_SLOTS.forEach(slot => {
+            const match = filteredRecords.find(r => 
+              r.date === d && 
+              r.agentName === agent && 
+              r.evaluationSlot === slot && 
+              !r.noWork &&
+              (type === 'rework' ? r.reworkStatus : true)
+            );
+            if (match) {
+              const score = type === 'rework' ? match.avgScore : (match.originalScore ?? match.avgScore);
+              data[`${agent} (${slot})`] = score;
+            }
           });
-        }
+        });
+        return data;
       });
-    });
-    return data.sort((a, b) => b.score - a.score);
+    };
+
+    return { 
+      regular: processRecords('regular'), 
+      rework: processRecords('rework'), 
+      agentSlots 
+    };
   }, [filteredRecords]);
 
-  const toggleAgent = (name: string) => {
-    setSelectedAgents(prev => 
-      prev.includes(name) ? prev.filter(a => a !== name) : [...prev, name]
-    );
-  };
+  // For Project Wise Scores (Horizontal Bar Charts)
+  const horizontalProjectData = useMemo(() => {
+    const activeAgents = Array.from(new Set(filteredRecords.map(r => r.agentName)));
+    
+    const processHorizontal = (type: 'regular' | 'rework') => {
+      return PROJECTS.map(proj => {
+        const data: any = { projectName: proj };
+        activeAgents.forEach(agent => {
+          const matches = filteredRecords.filter(r => 
+            r.projectName === proj && 
+            r.agentName === agent && 
+            !r.noWork &&
+            (type === 'rework' ? r.reworkStatus : true)
+          );
+          if (matches.length > 0) {
+            const sum = matches.reduce((acc, r) => acc + (type === 'rework' ? r.avgScore : (r.originalScore ?? r.avgScore)), 0);
+            data[agent] = parseFloat((sum / matches.length).toFixed(1));
+          }
+        });
+        return data;
+      }).filter(p => Object.keys(p).length > 1);
+    };
 
-  const agentsList = allUsers.filter(u => u.role === UserRole.AGENT).map(u => u.name);
+    return { 
+      regular: processHorizontal('regular'), 
+      rework: processHorizontal('rework'), 
+      agents: activeAgents 
+    };
+  }, [filteredRecords]);
+
+  // Unique Active Agents per Project
+  const agentsCountByProject = useMemo(() => {
+    return PROJECTS.map(proj => {
+      const uniqueAgents = new Set(
+        filteredRecords
+          .filter(r => r.projectName === proj)
+          .map(r => r.agentName)
+      );
+      return {
+        projectName: proj,
+        agentCount: uniqueAgents.size
+      };
+    });
+  }, [filteredRecords]);
+
+  const colors = ['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#475569', '#9333ea'];
 
   return (
-    <div className="space-y-6 flex flex-col h-full overflow-hidden">
-      {/* Filters */}
-      <div className="bg-white p-5 rounded-3xl shadow-sm flex flex-wrap items-center justify-between gap-6 border border-slate-100">
-        <div className="flex items-center gap-8">
-          <div className="flex flex-col">
-            <span className="text-[10px] font-black text-slate-400 uppercase mb-1">Agents & Date</span>
-            <div className="flex items-center gap-3">
-              {user.role !== UserRole.AGENT ? (
-                <div className="relative">
-                  <button 
-                    onClick={() => setIsAgentFilterOpen(!isAgentFilterOpen)}
-                    className="flex items-center gap-3 bg-slate-50 px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200"
-                  >
-                    <i className="bi bi-people text-indigo-600"></i>
-                    <span>{selectedAgents.length === 0 ? "Agents" : `${selectedAgents.length} Selected`}</span>
-                    <i className={`bi bi-chevron-${isAgentFilterOpen ? 'up' : 'down'}`}></i>
-                  </button>
-                  {isAgentFilterOpen && (
-                    <div className="absolute top-full left-0 mt-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 p-3">
-                      <div className="max-h-60 overflow-y-auto space-y-1 custom-scrollbar">
-                        {agentsList.map(agent => (
-                          <label key={agent} className="flex items-center gap-3 p-2 hover:bg-indigo-50 rounded-xl cursor-pointer">
-                            <input 
-                              type="checkbox" 
-                              checked={selectedAgents.includes(agent)}
-                              onChange={() => toggleAgent(agent)}
-                              className="w-4 h-4 rounded text-indigo-600"
-                            />
-                            <span className="text-sm font-semibold">{agent}</span>
-                          </label>
-                        ))}
-                      </div>
+    <div className="space-y-6 flex flex-col h-full bg-slate-50">
+      <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-wrap items-center justify-between gap-6 shrink-0">
+        <div className="flex flex-col">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">
+            {user.role === UserRole.AGENT ? "My Personal Slicer" : "Single Agent Slicer"}
+          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            {user.role !== UserRole.AGENT ? (
+              <div className="relative">
+                <button 
+                  onClick={() => setIsAgentFilterOpen(!isAgentFilterOpen)} 
+                  className="flex items-center gap-3 bg-slate-50 px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 transition-all hover:bg-slate-100 min-w-[200px] justify-between"
+                >
+                  <div className="flex items-center gap-2">
+                    <i className="bi bi-person-fill text-indigo-600"></i>
+                    <span>{selectedAgent === 'All' ? "All Active Agents" : selectedAgent}</span>
+                  </div>
+                  <i className={`bi bi-chevron-${isAgentFilterOpen ? 'up' : 'down'} text-[10px] text-slate-400`}></i>
+                </button>
+                {isAgentFilterOpen && (
+                  <div className="absolute top-full left-0 mt-3 w-72 bg-white border border-slate-200 rounded-3xl shadow-2xl z-[60] p-2">
+                    <div className="max-h-60 overflow-y-auto custom-scrollbar p-2 space-y-1">
+                      <button 
+                        onClick={() => { setSelectedAgent('All'); setIsAgentFilterOpen(false); }}
+                        className={`w-full text-left p-3 rounded-xl text-xs font-black uppercase transition-all ${selectedAgent === 'All' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-50 text-slate-600'}`}
+                      >
+                        Aggregate All Agents
+                      </button>
+                      <div className="h-px bg-slate-100 my-2"></div>
+                      {agentsList.map(agent => (
+                        <button 
+                          key={agent} 
+                          onClick={() => { setSelectedAgent(agent); setIsAgentFilterOpen(false); }}
+                          className={`w-full text-left p-3 rounded-xl text-sm font-bold transition-all ${selectedAgent === agent ? 'bg-indigo-50 text-indigo-700 border-l-4 border-indigo-600' : 'hover:bg-slate-50 text-slate-700'}`}
+                        >
+                          {agent}
+                        </button>
+                      ))}
                     </div>
-                  )}
-                </div>
-              ) : (
-                <div className="bg-slate-50 px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 flex items-center gap-2">
-                  <i className="bi bi-person text-indigo-600"></i>
-                  {user.name}
-                </div>
-              )}
-
-              <div className="flex items-center gap-3 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-200">
-                <i className="bi bi-calendar3 text-indigo-600"></i>
-                <input type="date" value={dateRange.start} onChange={e => setDateRange(prev => ({ ...prev, start: e.target.value }))} className="bg-transparent text-xs font-black outline-none" />
-                <span className="text-slate-300">-</span>
-                <input type="date" value={dateRange.end} onChange={e => setDateRange(prev => ({ ...prev, end: e.target.value }))} className="bg-transparent text-xs font-black outline-none" />
+                  </div>
+                )}
               </div>
+            ) : (
+              <div className="flex items-center gap-3 bg-indigo-50 px-4 py-2.5 rounded-xl text-sm font-black text-indigo-700 border border-indigo-100 shadow-sm">
+                <i className="bi bi-person-badge-fill"></i>
+                <span>{user.name} (Self)</span>
+              </div>
+            )}
+            <div className="flex items-center gap-3 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-200">
+              <input type="date" value={dateRange.start} onChange={e => setDateRange(prev => ({ ...prev, start: e.target.value }))} className="bg-transparent text-xs font-black outline-none" />
+              <span className="text-slate-300 font-black">→</span>
+              <input type="date" value={dateRange.end} onChange={e => setDateRange(prev => ({ ...prev, end: e.target.value }))} className="bg-transparent text-xs font-black outline-none" />
             </div>
           </div>
         </div>
-
         <div className="flex flex-col">
-          <span className="text-[10px] font-black text-slate-400 uppercase mb-1">Project</span>
-          <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} className="bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl text-sm font-bold outline-none">
-            <option value="All">All Projects</option>
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Project Focus</span>
+          <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} className="bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl text-sm font-bold outline-none cursor-pointer">
+            <option value="All">All Operations</option>
             {PROJECTS.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
       </div>
 
-      {/* 3 KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-7 rounded-[2rem] shadow-sm border-l-8 border-indigo-600 flex items-center justify-between">
-          <div>
-            <p className="text-slate-400 text-[10px] font-black uppercase mb-1">Average QC Score</p>
-            <h3 className="text-4xl font-black text-slate-900">{kpis.avgScore}%</h3>
-          </div>
-          <i className="bi bi-graph-up text-4xl text-indigo-200"></i>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 shrink-0">
+        <div className="bg-white p-6 rounded-[2rem] shadow-sm border-l-[8px] border-indigo-600 flex items-center justify-between">
+          <div><p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Regular Avg</p><h3 className="text-4xl font-black">{kpis.mainAvg}%</h3></div>
+          <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center"><i className="bi bi-activity text-2xl text-indigo-600"></i></div>
         </div>
-        <div className="bg-white p-7 rounded-[2rem] shadow-sm border-l-8 border-rose-600 flex items-center justify-between">
-          <div>
-            <p className="text-slate-400 text-[10px] font-black uppercase mb-1">Active Projects</p>
-            <h3 className="text-4xl font-black text-slate-900">{kpis.activeProjectsCount}</h3>
-          </div>
-          <i className="bi bi-briefcase text-4xl text-rose-200"></i>
+        <div className="bg-white p-6 rounded-[2rem] shadow-sm border-l-[8px] border-emerald-500 flex items-center justify-between">
+          <div><p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Rework Avg</p><h3 className="text-4xl font-black">{kpis.reworkAvg}%</h3></div>
+          <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center"><i className="bi bi-arrow-repeat text-2xl text-emerald-600"></i></div>
         </div>
-        <div className="bg-white p-7 rounded-[2rem] shadow-sm border-l-8 border-amber-500 flex items-center justify-between">
-          <div>
-            <p className="text-slate-400 text-[10px] font-black uppercase mb-1">Active Agents</p>
-            <h3 className="text-4xl font-black text-slate-900">{kpis.activeAgentsCount}</h3>
-          </div>
-          <i className="bi bi-people text-4xl text-amber-200"></i>
+        <div className="bg-white p-6 rounded-[2rem] shadow-sm border-l-[8px] border-rose-500 flex items-center justify-between">
+          <div><p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Projects</p><h3 className="text-4xl font-black">{kpis.activeProjectsCount}</h3></div>
+          <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center"><i className="bi bi-stack text-2xl text-rose-600"></i></div>
+        </div>
+        <div className="bg-white p-6 rounded-[2rem] shadow-sm border-l-[8px] border-amber-500 flex items-center justify-between">
+          <div><p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">{user.role === UserRole.AGENT ? "Daily Records" : "Active Selection"}</p><h3 className="text-4xl font-black">{user.role === UserRole.AGENT ? filteredRecords.length : (selectedAgent === 'All' ? kpis.activeAgentsCount : 1)}</h3></div>
+          <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center"><i className="bi bi-person-check text-2xl text-amber-600"></i></div>
         </div>
       </div>
 
-      {/* 3 Graphs */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 overflow-y-auto custom-scrollbar pb-10">
-        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 h-[450px]">
-          <h4 className="text-sm font-black text-slate-800 uppercase mb-6 flex items-center gap-2">
-            <i className="bi bi-graph-up text-indigo-600"></i> QC Score % Trends
-          </h4>
-          <ResponsiveContainer width="100%" height="85%">
-            <LineChart data={lineChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <XAxis dataKey="date" tick={{fontSize: 10, fontWeight: 800}} />
-              <YAxis domain={[0, 100]} tick={{fontSize: 10, fontWeight: 800}} />
-              <Tooltip contentStyle={{borderRadius: '15px'}} />
-              <Legend iconType="circle" />
-              {Array.from(new Set(filteredRecords.map(r => r.agentName))).map((agent, i) => (
-                <Line key={agent} type="monotone" dataKey={agent} stroke={`hsl(${i * 137.5}, 70%, 50%)`} strokeWidth={3} dot={{r: 4}} />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
+      <div className="flex-1 overflow-y-auto custom-scrollbar pr-3 pb-12 space-y-10">
+        {/* Trend Lines Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6"><i className="bi bi-graph-up-arrow text-indigo-600 mr-2"></i> Quality Trend (Regular)</h4>
+            <div className="flex-1 min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendLineData.regular}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="date" tick={{fontSize: 10, fontWeight: 700}} axisLine={false} />
+                  <YAxis domain={[0, 100]} tick={{fontSize: 10, fontWeight: 700}} axisLine={false} />
+                  <Tooltip contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}} />
+                  <Legend iconType="circle" />
+                  {trendLineData.agentSlots.map((slotKey, i) => (
+                    <Line key={slotKey} type="monotone" dataKey={slotKey} stroke={colors[i % colors.length]} strokeWidth={3} dot={{r: 4}} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6"><i className="bi bi-arrow-repeat text-emerald-600 mr-2"></i> Quality Trend (Rework)</h4>
+            <div className="flex-1 min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendLineData.rework}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="date" tick={{fontSize: 10, fontWeight: 700}} axisLine={false} />
+                  <YAxis domain={[0, 100]} tick={{fontSize: 10, fontWeight: 700}} axisLine={false} />
+                  <Tooltip contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}} />
+                  <Legend iconType="circle" />
+                  {trendLineData.agentSlots.map((slotKey, i) => (
+                    <Line key={slotKey} type="monotone" dataKey={slotKey} stroke={colors[i % colors.length]} strokeWidth={3} dot={{r: 4}} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 h-[450px]">
-          <h4 className="text-sm font-black text-slate-800 uppercase mb-6 flex items-center gap-2">
-            <i className="bi bi-people text-rose-600"></i> Agents count by Project
-          </h4>
-          <ResponsiveContainer width="100%" height="85%">
-            <BarChart data={projectStats} barSize={35}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <XAxis dataKey="projectName" tick={{fontSize: 10, fontWeight: 800}} />
-              <YAxis allowDecimals={false} tick={{fontSize: 10, fontWeight: 800}} />
-              <Tooltip cursor={{fill: '#f8fafc'}} />
-              <Bar dataKey="activeAgents" fill="#ef4444" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+        {/* Project Wise QC Score Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6"><i className="bi bi-bar-chart-steps text-indigo-600 mr-2"></i> Project QC Score (Regular)</h4>
+            <div className="flex-1 min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={horizontalProjectData.regular} layout="vertical" margin={{ left: 40, right: 30 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                  <XAxis type="number" domain={[0, 100]} tick={{fontSize: 10, fontWeight: 700}} axisLine={false} />
+                  <YAxis dataKey="projectName" type="category" tick={{fontSize: 10, fontWeight: 700}} axisLine={false} width={80} />
+                  <Tooltip contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}} />
+                  <Legend iconType="circle" />
+                  {horizontalProjectData.agents.map((agent, i) => (
+                    <Bar key={agent} dataKey={agent} fill={colors[i % colors.length]} radius={[0, 5, 5, 0]} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6"><i className="bi bi-bar-chart-steps text-emerald-600 mr-2"></i> Project QC Score (Rework)</h4>
+            <div className="flex-1 min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={horizontalProjectData.rework} layout="vertical" margin={{ left: 40, right: 30 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                  <XAxis type="number" domain={[0, 100]} tick={{fontSize: 10, fontWeight: 700}} axisLine={false} />
+                  <YAxis dataKey="projectName" type="category" tick={{fontSize: 10, fontWeight: 700}} axisLine={false} width={80} />
+                  <Tooltip contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}} />
+                  <Legend iconType="circle" />
+                  {horizontalProjectData.agents.map((agent, i) => (
+                    <Bar key={agent} dataKey={agent} fill={colors[i % colors.length]} radius={[0, 5, 5, 0]} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 lg:col-span-2 min-h-[500px]">
-          <h4 className="text-sm font-black text-slate-800 uppercase mb-8 flex items-center gap-2">
-            <i className="bi bi-bullseye text-indigo-600"></i> Agent vs Project Performance
-          </h4>
-          <ResponsiveContainer width="100%" height={Math.max(400, agentProjectData.length * 50)}>
-            <BarChart data={agentProjectData} layout="vertical" margin={{ left: 140, right: 40 }} barSize={20}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={true} horizontal={false} />
-              <XAxis type="number" domain={[0, 100]} tick={{fontSize: 10, fontWeight: 800}} />
-              <YAxis dataKey="name" type="category" width={130} tick={{fontSize: 10, fontWeight: 900, fill: '#1e293b'}} />
-              <Tooltip cursor={{fill: '#f8fafc'}} />
-              <Bar dataKey="score" fill="#4f46e5" radius={[0, 8, 8, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+        {/* Unique Active Agents per Project Chart */}
+        <div className="grid grid-cols-1 gap-8">
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6"><i className="bi bi-people-fill text-amber-500 mr-2"></i> Active Agents Distribution per Project</h4>
+            <div className="flex-1 min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={agentsCountByProject} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="projectName" tick={{fontSize: 11, fontWeight: 800}} axisLine={false} />
+                  <YAxis allowDecimals={false} tick={{fontSize: 11, fontWeight: 800}} axisLine={false} />
+                  <Tooltip 
+                    cursor={{fill: '#f8fafc'}}
+                    contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}}
+                  />
+                  <Legend verticalAlign="top" height={36}/>
+                  <Bar dataKey="agentCount" name="Unique Active Agents" fill="#f59e0b" radius={[12, 12, 0, 0]} barSize={60}>
+                    {agentsCountByProject.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       </div>
     </div>

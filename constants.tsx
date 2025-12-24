@@ -1,5 +1,5 @@
 
-import { QCError, UserRole, User } from './types';
+import { QCError, UserRole, User, EvaluationSlot } from './types';
 
 export const INITIAL_USERS: User[] = [
   { id: 'u1', name: 'Mohsin', role: UserRole.MANAGER },
@@ -15,6 +15,8 @@ export const INITIAL_USERS: User[] = [
 ];
 
 export const PROJECTS = ['Moveeasy', 'Mfund', 'Altrum'];
+
+export const EVALUATION_SLOTS: EvaluationSlot[] = ['12 PM', '4 PM', '6 PM'];
 
 export const QC_ERRORS: QCError[] = [
   { id: 'fmt1', name: 'Typo / Grammar Error', category: 'FORMATTING', weight: -5 },
