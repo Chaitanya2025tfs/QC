@@ -58,8 +58,56 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     return { mainAvg, reworkAvg, activeProjectsCount, activeAgentsCount };
   }, [filteredRecords]);
 
+  // Performance Summary Table Data (Grouped by Date, Agent, and Project)
+  // Now tracks separate scores for Regular and Rework components
+  const summaryTableData = useMemo(() => {
+    const groups: Record<string, { 
+      date: string, 
+      agent: string, 
+      project: string, 
+      count: number, 
+      regSum: number, 
+      regCount: number,
+      rewSum: number,
+      rewCount: number
+    }> = {};
+    
+    filteredRecords.forEach(r => {
+      const key = `${r.date}-${r.agentName}-${r.projectName}`;
+      if (!groups[key]) {
+        groups[key] = {
+          date: r.date,
+          agent: r.agentName,
+          project: r.projectName,
+          count: 0,
+          regSum: 0,
+          regCount: 0,
+          rewSum: 0,
+          rewCount: 0
+        };
+      }
+      groups[key].count += 1;
+      if (!r.noWork) {
+        // Regular Score is either the only score OR the original score before rework
+        groups[key].regSum += (r.originalScore ?? r.avgScore);
+        groups[key].regCount += 1;
+        
+        // Rework score only applies if rework was actually performed
+        if (r.reworkStatus) {
+          groups[key].rewSum += r.avgScore;
+          groups[key].rewCount += 1;
+        }
+      }
+    });
+
+    return Object.values(groups).map(g => ({
+      ...g,
+      regAvg: g.regCount > 0 ? parseFloat((g.regSum / g.regCount).toFixed(1)) : null,
+      rewAvg: g.rewCount > 0 ? parseFloat((g.rewSum / g.rewCount).toFixed(1)) : null
+    })).sort((a, b) => b.date.localeCompare(a.date) || a.agent.localeCompare(b.agent));
+  }, [filteredRecords]);
+
   // Aggregate scores by Date and Time Slot
-  // Logic: Shows AVERAGE score for the slot if multiple tasks exist
   const trendLineData = useMemo(() => {
     const dates = Array.from(new Set(filteredRecords.map(r => r.date))).sort();
     
@@ -88,10 +136,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     };
   }, [filteredRecords]);
 
-  // Aggregate scores by Project and Time Slot
   const horizontalProjectData = useMemo(() => {
     const processHorizontal = (type: 'regular' | 'rework') => {
-      // If a specific project is selected, we only process that one
       const targetProjects = selectedProject === 'All' ? PROJECTS : [selectedProject];
       
       return targetProjects.map(proj => {
@@ -137,6 +183,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
 
   return (
     <div className="space-y-6 flex flex-col h-full bg-slate-50">
+      {/* Header / Filter Section */}
       <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-wrap items-center justify-between gap-6 shrink-0">
         <div className="flex flex-col">
           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">
@@ -200,6 +247,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         </div>
       </div>
 
+      {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 shrink-0">
         <div className="bg-white p-6 rounded-[2rem] shadow-sm border-l-[8px] border-indigo-600 flex items-center justify-between">
           <div><p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Regular Avg</p><h3 className="text-4xl font-black">{kpis.mainAvg}%</h3></div>
@@ -220,6 +268,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar pr-3 pb-12 space-y-10">
+        {/* Trend Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
             <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
@@ -261,6 +310,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
           </div>
         </div>
 
+        {/* Bar Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 h-[450px] flex flex-col">
             <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
@@ -299,6 +349,144 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   ))}
                 </BarChart>
               </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Performance Summary Table */}
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col">
+          <div className="flex items-center justify-between mb-8">
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+              <i className="bi bi-calendar-check text-indigo-600"></i> Performance & Productivity Summary
+            </h4>
+            <div className="px-3 py-1 bg-slate-100 rounded-lg text-[9px] font-black text-slate-500 uppercase">
+              {summaryTableData.length} Grouped Entries
+            </div>
+          </div>
+          
+          <div className="rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+              <table className="w-full text-left">
+                <thead className="sticky top-0 bg-slate-50 z-10">
+                  <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <th className="px-6 py-4">Date</th>
+                    <th className="px-6 py-4">Agent Name</th>
+                    <th className="px-6 py-4">Project</th>
+                    <th className="px-6 py-4 text-center">Submissions</th>
+                    <th className="px-6 py-4 text-center">Regular QC Score</th>
+                    <th className="px-6 py-4 text-right">Rework QC Score</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50 bg-white">
+                  {summaryTableData.map((row) => (
+                    <tr key={`${row.date}-${row.agent}-${row.project}`} className="hover:bg-slate-50 transition-colors group">
+                      <td className="px-6 py-4 text-xs font-bold text-slate-500">{row.date}</td>
+                      <td className="px-6 py-4 text-sm font-black text-slate-900">{row.agent}</td>
+                      <td className="px-6 py-4">
+                        <span className="px-3 py-1 bg-indigo-50 text-indigo-700 text-[10px] font-black rounded-lg uppercase border border-indigo-100">
+                          {row.project}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="text-sm font-black text-slate-700 bg-slate-100 px-3 py-1 rounded-lg">
+                          {row.count}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`text-base font-black ${row.regAvg !== null && row.regAvg < 90 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          {row.regAvg !== null ? `${row.regAvg}%` : '-'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <span className={`text-base font-black ${row.rewAvg !== null && row.rewAvg < 90 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                          {row.rewAvg !== null ? `${row.rewAvg}%` : <span className="text-slate-300 font-normal italic text-xs">No Reworks</span>}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {summaryTableData.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-20 text-center italic text-slate-400 font-medium">
+                        No performance data matches the current filters.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Operations Distribution Section */}
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col">
+          <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-8 flex items-center gap-2">
+            <i className="bi bi-pie-chart-fill text-amber-500"></i> Active Agent Distribution per Project
+          </h4>
+          
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+            <div className="lg:col-span-5 h-[350px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={agentsDetailByProject}
+                    dataKey="agentCount"
+                    nameKey="projectName"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={100}
+                    paddingAngle={5}
+                    label={({ name, percent }: any) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                  >
+                    {agentsDetailByProject.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={genericColors[index % genericColors.length]} strokeWidth={0} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{borderRadius: '15px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="lg:col-span-7 overflow-hidden">
+              <div className="rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      <th className="px-6 py-4">Project Name</th>
+                      <th className="px-6 py-4 text-center">Active Agents</th>
+                      <th className="px-6 py-4">Agent Names</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {agentsDetailByProject.map((p, idx) => (
+                      <tr key={p.projectName} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: genericColors[idx % genericColors.length] }}></div>
+                            <span className="text-sm font-black text-slate-900">{p.projectName}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className="inline-block px-3 py-1 bg-slate-100 rounded-lg text-xs font-black text-slate-600">
+                            {p.agentCount}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            {p.agentNames.map(name => (
+                              <span key={name} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-md border border-indigo-100">
+                                {name}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>

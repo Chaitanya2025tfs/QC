@@ -49,6 +49,9 @@ export interface QCRecord {
   qcCodeRangeStart: string;
   qcCodeRangeEnd: string;
   subSamples: SubSampleRecord[];
+  manualScore?: number | null;
+  manualErrors?: string[]; // New field for tracked manual errors
+  manualNotes?: string; // New field for specific manual feedback
   avgScore: number;
   originalScore: number; 
   createdAt: number;
