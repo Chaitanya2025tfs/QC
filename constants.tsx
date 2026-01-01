@@ -16,6 +16,16 @@ export const INITIAL_USERS: User[] = [
 
 export const PROJECTS = ['Moveeasy', 'Mfund', 'Altrum'];
 
+// New detailed project list for the Production Tracker based on user request
+export const TRACKER_PROJECTS = [
+  { name: 'Altrum- Bi (V1)', target: 13 },
+  { name: 'Altrum- Bi (V2)', target: 22 },
+  { name: 'Altrum- Bi (V3)', target: 1 },
+  { name: 'Rex-Stand', target: 31 },
+  { name: 'Training', target: 0 },
+  { name: 'Rex-Logo S', target: 16 }
+];
+
 export const TIME_SLOTS = ['12 PM', '4 PM', '6 PM'];
 
 export const QC_ERRORS: QCError[] = [

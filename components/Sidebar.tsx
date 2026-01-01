@@ -14,6 +14,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, us
     { name: 'Dashboard', icon: <i className="bi bi-speedometer2"></i>, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.QC_AGENT, UserRole.AGENT] },
     { name: 'Qc form', icon: <i className="bi bi-file-earmark-text"></i>, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.QC_AGENT] },
     { name: 'Report table', icon: <i className="bi bi-table"></i>, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.QC_AGENT, UserRole.AGENT] },
+    { name: 'Production Tracker', icon: <i className="bi bi-clipboard-data"></i>, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.QC_AGENT, UserRole.AGENT] },
     { name: 'Admin', icon: <i className="bi bi-gear"></i>, roles: [UserRole.ADMIN] },
   ];
 

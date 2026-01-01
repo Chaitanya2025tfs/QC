@@ -8,10 +8,11 @@ import Dashboard from './components/Dashboard';
 import QCForm from './components/QCForm';
 import ReportTable from './components/ReportTable';
 import AdminPanel from './components/AdminPanel';
+import ProductionTracker from './components/ProductionTracker';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(getCurrentUser());
-  const [activeTab, setActiveTab] = useState<'Dashboard' | 'Qc form' | 'Report table' | 'Admin'>('Dashboard');
+  const [activeTab, setActiveTab] = useState<'Dashboard' | 'Qc form' | 'Report table' | 'Production Tracker' | 'Admin'>('Dashboard');
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
 
   const handleLogin = (user: User) => {
@@ -62,6 +63,9 @@ const App: React.FC = () => {
               user={currentUser} 
               onEdit={handleEdit} 
             />
+          )}
+          {activeTab === 'Production Tracker' && (
+            <ProductionTracker user={currentUser} />
           )}
           {activeTab === 'Admin' && currentUser.role === UserRole.ADMIN && (
             <AdminPanel />

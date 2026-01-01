@@ -64,3 +64,14 @@ export interface ProjectStats {
   activeAgents: number;
   avgScore: number;
 }
+
+export interface ProductionRecord {
+  id: string;
+  userId: string;
+  userName: string;
+  date: string;
+  projectName: string;
+  target: number;
+  actualCount: number;
+  createdAt: number;
+}
